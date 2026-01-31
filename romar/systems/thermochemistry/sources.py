@@ -96,6 +96,8 @@ class Sources(object):
       if (k in self.rad.rates):
         rates = self.rad.rates[k]
         ops[k] = self._compose_ops_ion(rates)
+        if (k == "BF"):
+          ops[k+"_e"] = self._compose_ops_ion(rates, apply_energy=True)
     return ops
 
   def _compose_ops_exc(self, rates, apply_energy=False):
@@ -159,13 +161,13 @@ class Sources(object):
 
   def omega_energy_t(self, omegas):
     f = torch.zeros(1)
-    for k in ("rad_bb", "rad_ff"):
+    for k in ("rad_bb", "rad_bf_h", "rad_bf_e", "rad_ff"):
       f += omegas[k]
     return f
 
   def omega_energy_e(self, omegas):
     f = torch.zeros(1)
-    for k in ("kin_exc", "kin_ion", "kin_ela", "rad_bf", "rad_ff"):
+    for k in ("kin_exc", "kin_ion", "kin_ela", "rad_bf_e", "rad_ff"):
       f += omegas[k]
     return f
 
@@ -199,10 +201,11 @@ class Sources(object):
   def omega_rad(self, omegas, rad_ops):
     if self.rad.active:
       omegas["rad_bb"] = self._omega_rad_bb(rad_ops)
-      omegas["rad_bf"] = self._omega_rad_bf(rad_ops)
+      omegas["rad_bf_h"] = self._omega_rad_bf_h(rad_ops)
+      omegas["rad_bf_e"] = self._omega_rad_bf_e(rad_ops)
       omegas["rad_ff"] = self._omega_rad_ff()
     else:
-      for k in ("rad_bb", "rad_bf", "rad_ff"):
+      for k in ("rad_bb", "rad_bf_h", "rad_bf_e", "rad_ff"):
         omegas[k] = torch.zeros(1)
     return omegas
 
@@ -210,7 +213,15 @@ class Sources(object):
     nn = self.mix.species["Ar"].n
     return - torch.sum(rad_ops["BB_e"] @ nn)
 
-  def _omega_rad_bf(self, rad_ops):
+  def _omega_rad_bf_h(self, rad_ops):
+    """BF contribution to heavy particle energy (internal energy change)"""
+    nn, ni, ne = [self.mix.species[k].n for k in ("Ar", "Arp", "em")]
+    # Recombination loses internal energy, photoionization gains
+    return - torch.sum(rad_ops["BF_e"]["bwd"] * ni * ne) \
+           + torch.sum(rad_ops["BF_e"]["fwd"] * nn)
+
+  def _omega_rad_bf_e(self, rad_ops):
+    """BF contribution to electron energy (first moment)"""
     nn, ni, ne = [self.mix.species[k].n for k in ("Ar", "Arp", "em")]
     return torch.sum(rad_ops["BFp"]["fwd"] * nn) \
          - torch.sum(rad_ops["BFp"]["bwd"] * ni * ne)
